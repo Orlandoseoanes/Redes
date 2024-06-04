@@ -1,0 +1,24 @@
+{
+  "name": "redes",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "start": "node src/index.js",
+    "dev": "npx nodemon src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "ip": "^2.0.1",
+    "ip-address": "^9.0.5",
+    "ip-subnet": "^0.1.2",
+    "ip-subnet-calculator": "^2.0.1",
+    "morgan": "^1.10.0",
+    "subnet-cidr-calculator": "^1.0.12"
+  }
+}
