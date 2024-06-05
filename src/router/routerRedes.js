@@ -11,29 +11,29 @@ router.get('/subnets', (req, res) => {
   }
 
   try {
-      // Calcular las subredes probables
-      const result = SubnetCIDRAdviser.calculate(ipAddress, netmaskBits);
-      const subnets = result.subnets;
+      // Calcular los bits adicionales necesarios para crear las subredes
+      const additionalBits = Math.ceil(Math.log2(numSubnets));
+      const newNetmaskBits = netmaskBits + additionalBits;
 
-      // Calcular la cantidad de subredes por grupo
-      const subnetsPerGroup = Math.ceil(subnets.length / numSubnets);
-
-      // Agrupar las subredes según el número especificado
-      const groupedSubnets = [];
-      for (let i = 0; i < subnets.length; i += subnetsPerGroup) {
-          const group = subnets.slice(i, i + subnetsPerGroup);
-          const formattedGroup = group.map(subnet => {
-              const { value, ipRange, range } = subnet;
-              const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, netmaskBits);
-              return { value, ipRange, range, broadcastAddr };
-          });
-          groupedSubnets.push(formattedGroup);
+      if (newNetmaskBits > 32) {
+          return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
       }
 
-      // Crear un objeto con las subredes agrupadas
+      // Calcular las subredes probables con la nueva submáscara
+      const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
+      const subnets = result.subnets.slice(0, numSubnets); // Obtener solo el número requerido de subredes
+
+      // Formatear las subredes con la dirección de broadcast
+      const formattedSubnets = subnets.map(subnet => {
+          const { value, ipRange, range } = subnet;
+          const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
+          return { value, ipRange, range, broadcastAddr };
+      });
+
+      // Agrupar las subredes en el objeto de respuesta
       const groupedSubnetsObj = {};
-      groupedSubnets.forEach((group, index) => {
-          groupedSubnetsObj[`subred${index + 1}`] = group;
+      formattedSubnets.forEach((subnet, index) => {
+          groupedSubnetsObj[`subred${index + 1}`] = [subnet];
       });
 
       // Devolver las subredes agrupadas como respuesta
@@ -60,7 +60,6 @@ function calculateBroadcast(ipStart, ipEnd, netmaskBits) {
   const broadcastAddr = broadcastParts.map(part => part & 255).join('.');
   return broadcastAddr;
 }
-
 
 // Función para calcular la máscara de red
 function calculateNetmask(netmaskBits) {
