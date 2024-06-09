@@ -5,6 +5,9 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const axios = require('axios');
+const ip6 = require('ip6');
+
 
 router.post('/subnets', (req, res) => {
   const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
@@ -210,6 +213,29 @@ router.post('/pdfsubnets', (req, res) => {
     } catch (error) {
         console.error('Error al calcular las subredes:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+});
+
+
+router.post('/geoubicacion', async (req, res) => {
+    try {
+        const ip = req.body.ip;
+        
+        if (!ip) {
+            return res.status(400).json({ error: 'IP address is required' });
+        }
+
+        const url = `https://api.ip2location.io/?key=896FD73632BDAEA2285FC2B6B5D65146&ip=${ip}`;
+        const response = await axios.get(url);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error:', error);
+
+        if (error.response) {
+            return res.status(error.response.status).json({ error: error.response.data });
+        }
+
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

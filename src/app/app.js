@@ -4,9 +4,9 @@ const morgan = require('morgan');
 const app = express();
 
 
-var createError = require('http-errors');
+const createError = require('http-errors');
 const cors = require('cors');
-var path = require('path');
+const path = require('path');
 /////////
 
 const routerRedes =require ('../router/routerRedes');
