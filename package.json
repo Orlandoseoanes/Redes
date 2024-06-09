@@ -19,6 +19,8 @@
     "ip-subnet": "^0.1.2",
     "ip-subnet-calculator": "^2.0.1",
     "morgan": "^1.10.0",
-    "subnet-cidr-calculator": "^1.0.12"
+    "pdfkit": "^0.15.0",
+    "subnet-cidr-calculator": "^1.0.12",
+    "xlsx": "^0.18.5"
   }
 }
