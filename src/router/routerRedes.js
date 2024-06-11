@@ -6,50 +6,61 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const axios = require('axios');
-const ip6 = require('ip6');
 
 
 router.post('/subnets', (req, res) => {
-  const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
-
-  // Verificar si se proporcionan la dirección IP, los bits de máscara de red y el número de subredes
-  if (!ipAddress || !netmaskBits || !numSubnets) {
+    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+  
+    // Verificar si se proporcionan la dirección IP, los bits de máscara de red y el número de subredes
+    if (!ipAddress || netmaskBits === undefined || !numSubnets) {
       return res.status(400).json({ error: 'Se requiere la dirección IP, los bits de máscara de red y el número de subredes.' });
-  }
-
-  try {
+    }
+  
+    // Si la máscara de subred es 0, devolver la misma dirección IP
+    if (netmaskBits === 0) {
+      return res.json({
+        subred1: [{
+          value: ipAddress,
+          ipRange: { start: ipAddress, end: ipAddress },
+          range: `${ipAddress}/${netmaskBits}`,
+        }]
+      });
+    }
+  
+    try {
       // Calcular los bits adicionales necesarios para crear las subredes
       const additionalBits = Math.ceil(Math.log2(numSubnets));
       const newNetmaskBits = netmaskBits + additionalBits;
-
+  
       if (newNetmaskBits > 32) {
-          return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
+        return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
       }
-
+  
       // Calcular las subredes probables con la nueva submáscara
       const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
       const subnets = result.subnets.slice(0, numSubnets); // Obtener solo el número requerido de subredes
-
+  
       // Formatear las subredes con la dirección de broadcast
       const formattedSubnets = subnets.map(subnet => {
-          const { value, ipRange, range } = subnet;
-          const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
-          return { value, ipRange, range, broadcastAddr };
+        const { value, ipRange, range } = subnet;
+        const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
+        return { value, ipRange, range, broadcastAddr };
       });
-
+  
       // Agrupar las subredes en el objeto de respuesta
       const groupedSubnetsObj = {};
       formattedSubnets.forEach((subnet, index) => {
-          groupedSubnetsObj[`subred${index + 1}`] = [subnet];
+        groupedSubnetsObj[`subred${index + 1}`] = [subnet];
       });
-
+  
       // Devolver las subredes agrupadas como respuesta
       res.json(groupedSubnetsObj);
-  } catch (error) {
+    } catch (error) {
       console.error('Error al calcular las subredes:', error);
       res.status(500).json({ error: 'Error interno del servidor.' });
-  }
-});
+    }
+  });
+  
 
 // Función para calcular la dirección de broadcast de una subred
 function calculateBroadcast(ipStart, ipEnd, netmaskBits) {
