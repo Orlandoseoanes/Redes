@@ -9,74 +9,82 @@ const axios = require('axios');
 
 
 router.post('/subnets', (req, res) => {
-    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+    let { ip: ipAddress, netmaskBits, numSubnets } = req.body;
   
-    // Verificar si se proporcionan la dirección IP, los bits de máscara de red y el número de subredes
-    if (!ipAddress || netmaskBits === undefined || !numSubnets) {
-      return res.status(400).json({ error: 'Se requiere la dirección IP, los bits de máscara de red y el número de subredes.' });
+    // Verificar si se proporciona la dirección IP
+    if (!ipAddress) {
+        return res.status(400).json({ error: 'Se requiere la dirección IP.' });
     }
-  
+
+    // Si netmaskBits es nulo, asignar un valor por defecto
+    if (netmaskBits === undefined) {
+        netmaskBits = 24; // Valor por defecto
+    }
+
     // Si la máscara de subred es 0, devolver la misma dirección IP
     if (netmaskBits === 0) {
-      return res.json({
-        subred1: [{
-          value: ipAddress,
-          ipRange: { start: ipAddress, end: ipAddress },
-          range: `${ipAddress}/${netmaskBits}`,
-        }]
-      });
+        return res.json({
+            subred1: [{
+                value: ipAddress,
+                ipRange: { start: ipAddress, end: ipAddress },
+                range: `${ipAddress}/${netmaskBits}`,
+            }]
+        });
     }
   
     try {
-      // Calcular los bits adicionales necesarios para crear las subredes
-      const additionalBits = Math.ceil(Math.log2(numSubnets));
-      const newNetmaskBits = netmaskBits + additionalBits;
-  
-      if (newNetmaskBits > 32) {
-        return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
-      }
-  
-      // Calcular las subredes probables con la nueva submáscara
-      const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
-      const subnets = result.subnets.slice(0, numSubnets); // Obtener solo el número requerido de subredes
-  
-      // Formatear las subredes con la dirección de broadcast
-      const formattedSubnets = subnets.map(subnet => {
-        const { value, ipRange, range } = subnet;
-        const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
-        return { value, ipRange, range, broadcastAddr };
-      });
-  
-      // Agrupar las subredes en el objeto de respuesta
-      const groupedSubnetsObj = {};
-      formattedSubnets.forEach((subnet, index) => {
-        groupedSubnetsObj[`subred${index + 1}`] = [subnet];
-      });
-  
-      // Devolver las subredes agrupadas como respuesta
-      res.json(groupedSubnetsObj);
+        // Calcular los bits adicionales necesarios para crear las subredes
+        const additionalBits = Math.ceil(Math.log2(numSubnets || 1)); // Si numSubnets es nulo, usar 1
+        const newNetmaskBits = netmaskBits + additionalBits;
+
+        if (newNetmaskBits > 32) {
+            return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
+        }
+
+        // Calcular las subredes probables con la nueva submáscara
+        const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
+        let subnets = result.subnets;
+
+        // Si numSubnets no se proporciona, devolver todas las subredes posibles
+        if (numSubnets) {
+            subnets = subnets.slice(0, numSubnets); // Obtener solo el número requerido de subredes
+        }
+
+        // Formatear las subredes con la dirección de broadcast
+        const formattedSubnets = subnets.map(subnet => {
+            const { value, ipRange, range } = subnet;
+            const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
+            return { value, ipRange, range, broadcastAddr };
+        });
+
+        // Agrupar las subredes en el objeto de respuesta
+        const groupedSubnetsObj = {};
+        formattedSubnets.forEach((subnet, index) => {
+            groupedSubnetsObj[`subred${index + 1}`] = [subnet];
+        });
+
+        // Devolver las subredes agrupadas como respuesta
+        res.json(groupedSubnetsObj);
     } catch (error) {
-      console.error('Error al calcular las subredes:', error);
-      res.status(500).json({ error: 'Error interno del servidor.' });
+        console.error('Error al calcular las subredes:', error);
+        res.status(500).json({ error: 'Error interno del servidor.' });
     }
-  });
-  
+});
 
-// Función para calcular la dirección de broadcast de una subred
 function calculateBroadcast(ipStart, ipEnd, netmaskBits) {
-  const ipPartsStart = ipStart.split('.').map(Number);
-  const ipPartsEnd = ipEnd.split('.').map(Number);
-  const netmaskParts = calculateNetmask(netmaskBits).split('.').map(Number);
+    const ipPartsStart = ipStart.split('.').map(Number);
+    const ipPartsEnd = ipEnd.split('.').map(Number);
+    const netmaskParts = calculateNetmask(netmaskBits).split('.').map(Number);
 
-  // Calcular la dirección de broadcast para la subred
-  const broadcastParts = [];
-  for (let i = 0; i < 4; i++) {
-      broadcastParts.push(ipPartsEnd[i] | ~netmaskParts[i]);
-  }
+    // Calcular la dirección de broadcast para la subred
+    const broadcastParts = [];
+    for (let i = 0; i < 4; i++) {
+        broadcastParts.push(ipPartsEnd[i] | ~netmaskParts[i]);
+    }
 
-  // Devolver la dirección de broadcast de la subred
-  const broadcastAddr = broadcastParts.map(part => part & 255).join('.');
-  return broadcastAddr;
+    // Devolver la dirección de broadcast de la subred
+    const broadcastAddr = broadcastParts.map(part => part & 255).join('.');
+    return broadcastAddr;
 }
 
 // Función para calcular la máscara de red
@@ -102,14 +110,18 @@ if (!fs.existsSync(tempDir)) {
 }
 
 router.post('/excelsubnets', (req, res) => {
-    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+    let { ip: ipAddress, netmaskBits, numSubnets } = req.body;
 
-    if (!ipAddress || !netmaskBits || !numSubnets) {
-        return res.status(400).json({ error: 'Se requiere la dirección IP, los bits de máscara de red y el número de subredes.' });
+    if (!ipAddress) {
+        return res.status(400).json({ error: 'Se requiere la dirección IP.' });
+    }
+
+    if (netmaskBits === undefined) {
+        netmaskBits = 24; // Valor por defecto
     }
 
     try {
-        const additionalBits = Math.ceil(Math.log2(numSubnets));
+        const additionalBits = Math.ceil(Math.log2(numSubnets || 1)); // Si numSubnets es nulo, usar 1
         const newNetmaskBits = netmaskBits + additionalBits;
 
         if (newNetmaskBits > 32) {
@@ -117,7 +129,11 @@ router.post('/excelsubnets', (req, res) => {
         }
 
         const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
-        const subnets = result.subnets.slice(0, numSubnets);
+        let subnets = result.subnets;
+
+        if (numSubnets) {
+            subnets = subnets.slice(0, numSubnets);
+        }
 
         const formattedSubnets = subnets.map(subnet => {
             const { value, ipRange, range } = subnet;
@@ -125,31 +141,22 @@ router.post('/excelsubnets', (req, res) => {
             return { Subred: value, Valor: false, Rango: range, Inicio: ipRange.start, Fin: ipRange.end, Broadcast: broadcastAddr };
         });
 
-        // Crear una fila adicional con el título y la IP original
         const titleRow = ['Proyecto de redes 2024-1', '', '', '', '', ''];
         const ipRow = [ipAddress, '', '', '', '', ''];
-        
-        // Crear un nuevo libro de trabajo
-        const workbook = XLSX.utils.book_new();
 
-        // Convertir los datos a una hoja de trabajo
+        const workbook = XLSX.utils.book_new();
         const worksheet = XLSX.utils.json_to_sheet(formattedSubnets);
 
-        // Agregar las filas adicionales antes de los datos
-        XLSX.utils.sheet_add_aoa(worksheet, [titleRow], {origin: 0});
-        XLSX.utils.sheet_add_aoa(worksheet, [ipRow], {origin: 1});
+        XLSX.utils.sheet_add_aoa(worksheet, [titleRow], { origin: 0 });
+        XLSX.utils.sheet_add_aoa(worksheet, [ipRow], { origin: 1 });
 
-        // Ajustar las columnas para el título
         worksheet['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
 
-        // Agregar la hoja de trabajo al libro de trabajo
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Subredes');
 
-        // Escribir el archivo Excel a una carpeta temporal
         const tempFilePath = path.join(tempDir, 'subredes.xlsx');
         XLSX.writeFile(workbook, tempFilePath);
 
-        // Leer el archivo Excel y enviarlo en la respuesta
         const fileContent = fs.readFileSync(tempFilePath);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename=subredes.xlsx');
@@ -160,16 +167,19 @@ router.post('/excelsubnets', (req, res) => {
     }
 });
 
-
 router.post('/pdfsubnets', (req, res) => {
-    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+    let { ip: ipAddress, netmaskBits, numSubnets } = req.body;
 
-    if (!ipAddress || !netmaskBits || !numSubnets) {
-        return res.status(400).json({ error: 'Se requiere la dirección IP, los bits de máscara de red y el número de subredes.' });
+    if (!ipAddress) {
+        return res.status(400).json({ error: 'Se requiere la dirección IP.' });
+    }
+
+    if (netmaskBits === undefined) {
+        netmaskBits = 24; // Valor por defecto
     }
 
     try {
-        const additionalBits = Math.ceil(Math.log2(numSubnets));
+        const additionalBits = Math.ceil(Math.log2(numSubnets || 1)); // Si numSubnets es nulo, usar 1
         const newNetmaskBits = netmaskBits + additionalBits;
 
         if (newNetmaskBits > 32) {
@@ -177,47 +187,43 @@ router.post('/pdfsubnets', (req, res) => {
         }
 
         const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
-        const subnets = result.subnets.slice(0, numSubnets);
+        let subnets = result.subnets;
 
-        // Crear un nuevo documento PDF
+        if (numSubnets) {
+            subnets = subnets.slice(0, numSubnets);
+        }
+
         const doc = new PDFDocument();
 
-        // Establecer el título del documento
         doc.info.Title = 'Subredes';
 
-        // Stream para escribir el PDF
         const stream = doc.pipe(res);
 
-        // Escribir el contenido del PDF
         doc.fontSize(20).text('Proyecto de Redes 2024-1', { align: 'center' });
-        doc.moveDown(); // Mover hacia abajo para la siguiente línea
+        doc.moveDown();
         doc.fontSize(14).text(`IP Original: ${ipAddress}`, { align: 'center' });
-        doc.moveDown(); // Mover hacia abajo para la siguiente línea
+        doc.moveDown();
         doc.fontSize(12).text(`Número de Subredes: ${numSubnets}`, { align: 'center' });
-        doc.moveDown(); // Mover hacia abajo para la siguiente línea
-        doc.moveDown(); // Espacio adicional
+        doc.moveDown();
+        doc.moveDown();
 
-        // Escribir los datos de las subredes
         subnets.forEach((subnet, index) => {
             doc.text(`Subred ${index + 1}: ${subnet.value}`);
             doc.text(`Rango: ${subnet.range}`);
             doc.text(`Inicio: ${subnet.ipRange.start}`);
             doc.text(`Fin: ${subnet.ipRange.end}`);
             doc.text(`Broadcast: ${calculateBroadcast(subnet.ipRange.start, subnet.ipRange.end, newNetmaskBits)}`);
-            doc.moveDown(); // Mover hacia abajo para la siguiente subred
-            doc.moveDown(); // Espacio adicional entre subredes
+            doc.moveDown();
+            doc.moveDown();
         });
 
-        // Finalizar el documento
         doc.end();
 
-        // Manejar errores
         doc.on('error', err => {
             console.error('Error al generar el PDF:', err);
             res.status(500).json({ error: 'Error interno del servidor.' });
         });
 
-        // Finalizar la respuesta
         stream.on('finish', () => {
             res.end();
         });
@@ -226,7 +232,6 @@ router.post('/pdfsubnets', (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
-
 
 router.post('/geoubicacion', async (req, res) => {
     try {
@@ -254,3 +259,5 @@ router.post('/geoubicacion', async (req, res) => {
 
 
 module.exports = router;
+
+
