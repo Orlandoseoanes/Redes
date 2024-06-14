@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const SubnetCIDRAdviser = require('subnet-cidr-calculator');
-const XLSX = require('xlsx');
+const xlsx = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
@@ -77,6 +77,72 @@ router.post('/subnets', (req, res) => {
     }
 });
 
+router.post('/pdfsubnets', (req, res) => {
+    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+
+    if (!ipAddress) {
+        return res.status(400).json({ error: 'Se requiere la dirección IP.' });
+    }
+
+    // Si netmaskBits es nulo, asignar un valor por defecto
+    const originalNetmaskBits = netmaskBits !== undefined ? netmaskBits : 24;
+
+    try {
+        // Iniciar el documento PDF
+        const doc = new PDFDocument();
+        let filename = 'subnets.pdf';
+        filename = encodeURIComponent(filename);
+        res.setHeader('Content-disposition', 'attachment; filename="' + filename + '"');
+        res.setHeader('Content-type', 'application/pdf');
+
+        doc.pipe(res);
+
+        // Agregar título
+        doc.fontSize(25).text('subredes', {
+            align: 'center'
+        });
+        // Agregar subtítulo: "Proyecto de Redes y Comunicaciones"
+        doc.fontSize(18).text('Proyecto de Redes y Comunicaciones', {
+            align: 'center'
+        });
+        doc.moveDown();
+
+        // Agregar subtítulo: "Profesor a cargo: Augusto David Alberto Meza"
+        doc.fontSize(16).text('Profesor a cargo: Augusto David Alberto Meza', {
+            align: 'center'
+        });
+        doc.moveDown();
+
+
+        // Agregar información de la IP original y la submáscara
+        doc.moveDown();
+        doc.fontSize(16).text(`Dirección IP original: ${ipAddress}`);
+        doc.text(`Submáscara: /${originalNetmaskBits}`);
+        doc.moveDown();
+
+        // Calcular las subredes
+        const result = SubnetCIDRAdviser.calculate(ipAddress, originalNetmaskBits, []);
+        const subnets = result.subnets.slice(0, numSubnets); // Obtener solo el número necesario de subredes
+
+        // Agregar las subredes como una lista
+        subnets.forEach((subnet, index) => {
+            doc.fontSize(14).text(`Subred ${index + 1}`, {
+                underline: true
+            });
+            doc.fontSize(12).text(`Valor: ${subnet.value}`);
+            doc.text(`Rango de IP: ${subnet.ipRange.start} - ${subnet.ipRange.end}`);
+            doc.text(`Rango: ${subnet.range}`);
+            doc.text(`Dirección de Broadcast: ${subnet.ipRange.end}`);
+            doc.moveDown();
+        });
+
+        // Finalizar el documento
+        doc.end();
+    } catch (error) {
+        console.error('Error al calcular las subredes:', error);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+});
 
 
 
@@ -87,128 +153,50 @@ if (!fs.existsSync(tempDir)) {
 }
 
 router.post('/excelsubnets', (req, res) => {
-    let { ip: ipAddress, netmaskBits, numSubnets } = req.body;
+    const { ip: ipAddress, netmaskBits, numSubnets } = req.body;
 
     if (!ipAddress) {
         return res.status(400).json({ error: 'Se requiere la dirección IP.' });
     }
 
-    if (netmaskBits === undefined) {
-        netmaskBits = 24; // Valor por defecto
-    }
+    // Si netmaskBits es nulo, asignar un valor por defecto
+    const originalNetmaskBits = netmaskBits !== undefined ? netmaskBits : 24;
 
     try {
-        const additionalBits = Math.ceil(Math.log2(numSubnets || 1)); // Si numSubnets es nulo, usar 1
-        const newNetmaskBits = netmaskBits + additionalBits;
+        // Calcular las subredes
+        const result = SubnetCIDRAdviser.calculate(ipAddress, originalNetmaskBits, []);
+        const subnets = result.subnets.slice(0, numSubnets); // Obtener solo el número necesario de subredes
 
-        if (newNetmaskBits > 32) {
-            return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
-        }
+        // Formatear los datos de las subredes para el archivo xlsx
+        const formattedSubnets = subnets.map((subnet, index) => ({
+            'Subred': `Subred ${index + 1}`,
+            'Valor': subnet.value,
+            'Rango de IP': `${subnet.ipRange.start} - ${subnet.ipRange.end}`,
+            'Rango': subnet.range.toString() // Convertir booleano a cadena de texto
+        }));
 
-        const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
-        let subnets = result.subnets;
+        // Crear un nuevo libro de Excel
+        const workbook = xlsx.utils.book_new();
 
-        if (numSubnets) {
-            subnets = subnets.slice(0, numSubnets);
-        }
+        // Crear una hoja de trabajo
+        const worksheet = xlsx.utils.json_to_sheet(formattedSubnets);
 
-        const formattedSubnets = subnets.map(subnet => {
-            const { value, ipRange, range } = subnet;
-            const broadcastAddr = calculateBroadcast(ipRange.start, ipRange.end, newNetmaskBits);
-            return { Subred: value, Valor: false, Rango: range, Inicio: ipRange.start, Fin: ipRange.end, Broadcast: broadcastAddr };
-        });
+        // Agregar la hoja de trabajo al libro de Excel
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'Subnets');
 
-        const titleRow = ['Proyecto de redes 2024-1', '', '', '', '', ''];
-        const ipRow = [ipAddress, '', '', '', '', ''];
+        // Convertir el libro de Excel a un buffer
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-        const workbook = XLSX.utils.book_new();
-        const worksheet = XLSX.utils.json_to_sheet(formattedSubnets);
-
-        XLSX.utils.sheet_add_aoa(worksheet, [titleRow], { origin: 0 });
-        XLSX.utils.sheet_add_aoa(worksheet, [ipRow], { origin: 1 });
-
-        worksheet['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
-
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Subredes');
-
-        const tempFilePath = path.join(tempDir, 'subredes.xlsx');
-        XLSX.writeFile(workbook, tempFilePath);
-
-        const fileContent = fs.readFileSync(tempFilePath);
+        // Enviar el buffer como respuesta
+        res.setHeader('Content-Disposition', 'attachment; filename=subnets.xlsx');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename=subredes.xlsx');
-        res.send(fileContent);
+        res.send(buffer);
     } catch (error) {
         console.error('Error al calcular las subredes:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
 
-router.post('/pdfsubnets', (req, res) => {
-    let { ip: ipAddress, netmaskBits, numSubnets } = req.body;
-
-    if (!ipAddress) {
-        return res.status(400).json({ error: 'Se requiere la dirección IP.' });
-    }
-
-    if (netmaskBits === undefined) {
-        netmaskBits = 24; // Valor por defecto
-    }
-
-    try {
-        const additionalBits = Math.ceil(Math.log2(numSubnets || 1)); // Si numSubnets es nulo, usar 1
-        const newNetmaskBits = netmaskBits + additionalBits;
-
-        if (newNetmaskBits > 32) {
-            return res.status(400).json({ error: 'Número de subredes excesivo para la máscara de red proporcionada.' });
-        }
-
-        const result = SubnetCIDRAdviser.calculate(ipAddress, newNetmaskBits);
-        let subnets = result.subnets;
-
-        if (numSubnets) {
-            subnets = subnets.slice(0, numSubnets);
-        }
-
-        const doc = new PDFDocument();
-
-        doc.info.Title = 'Subredes';
-
-        const stream = doc.pipe(res);
-
-        doc.fontSize(20).text('Proyecto de Redes 2024-1', { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(14).text(`IP Original: ${ipAddress}`, { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(12).text(`Número de Subredes: ${numSubnets}`, { align: 'center' });
-        doc.moveDown();
-        doc.moveDown();
-
-        subnets.forEach((subnet, index) => {
-            doc.text(`Subred ${index + 1}: ${subnet.value}`);
-            doc.text(`Rango: ${subnet.range}`);
-            doc.text(`Inicio: ${subnet.ipRange.start}`);
-            doc.text(`Fin: ${subnet.ipRange.end}`);
-            doc.text(`Broadcast: ${calculateBroadcast(subnet.ipRange.start, subnet.ipRange.end, newNetmaskBits)}`);
-            doc.moveDown();
-            doc.moveDown();
-        });
-
-        doc.end();
-
-        doc.on('error', err => {
-            console.error('Error al generar el PDF:', err);
-            res.status(500).json({ error: 'Error interno del servidor.' });
-        });
-
-        stream.on('finish', () => {
-            res.end();
-        });
-    } catch (error) {
-        console.error('Error al calcular las subredes:', error);
-        res.status(500).json({ error: 'Error interno del servidor.' });
-    }
-});
 
 router.post('/geoubicacion', async (req, res) => {
     try {
